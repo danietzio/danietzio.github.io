@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>The Tipping Point | Empirical Analysis</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <style>
+      :root {
+        --bg: #050a14;
+        --panel: #0f172a;
+        --accent: #22d3ee;
+        --danger: #f43f5e;
+        --warning: #eab308;
+        --text: #f8fafc;
+        --input: #1e293b;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        display: flex;
+        font-family: "Inter", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        overflow: hidden;
+      }
+      #sidebar {
+        width: 320px;
+        background: var(--panel);
+        padding: 25px;
+        border-right: 1px solid #1e293b;
+        display: flex;
+        flex-direction: column;
+        z-index: 10;
+        overflow-y: auto;
+      }
+      h1 {
+        color: var(--accent);
+        font-size: 18px;
+        margin-bottom: 5px;
+      }
+      .filter-group {
+        margin-top: 15px;
+      }
+      label {
+        display: block;
+        font-size: 11px;
+        color: #94a3b8;
+        margin-bottom: 5px;
+        text-transform: uppercase;
+      }
+      select,
+      input {
+        width: 100%;
+        background: var(--input);
+        border: 1px solid #334155;
+        color: white;
+        padding: 8px;
+        border-radius: 6px;
+        margin-bottom: 12px;
+      }
+      #readout,
+      #stats-box,
+      #range-insight {
+        background: rgba(0, 0, 0, 0.4);
+        padding: 15px;
+        border-radius: 12px;
+        border: 1px solid #334155;
+        font-size: 13px;
+        margin: 10px 0;
+        line-height: 1.4;
+      }
+      #stats-box {
+        border-color: var(--accent);
+      }
+      #range-insight {
+        border-left: 4px solid var(--warning);
+        display: none;
+      }
+      .stat-val {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--accent);
+      }
+      .legend {
+        margin-top: auto;
+        padding-top: 15px;
+        border-top: 1px solid #334155;
+      }
+      #canvas-container {
+        flex-grow: 1;
+        position: relative;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sidebar">
+      <h1>THE TIPPING POINT</h1>
+      <p style="font-size: 11px; opacity: 0.6">Real Dataset Exploration</p>
+
+      <div class="filter-group">
+        <label>Gender</label>
+        <select id="genderFilter" onchange="applyFilters()">
+          <option value="All">All Genders</option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+        </select>
+        <label>Min Age: <span id="ageLabel">18</span></label>
+        <input
+          type="range"
+          id="ageFilter"
+          min="18"
+          max="35"
+          value="18"
+          oninput="applyFilters()"
+        />
+      </div>
+
+      <div id="stats-box">
+        <label style="color: var(--accent)">Correlation (r)</label>
+        <div id="corr-val" class="stat-val">0.00</div>
+        <p
+          id="corr-desc"
+          style="font-size: 10px; margin-top: 5px; opacity: 0.8"
+        >
+          Analyzing relationship...
+        </p>
+      </div>
+
+      <div id="range-insight"></div>
+      <div id="readout">Hover grid to inspect real student clusters.</div>
+
+      <label>Sample Population</label>
+      <div id="status-val" class="stat-val">0</div>
+
+      <div class="legend">
+        <p style="font-size: 10px; color: var(--warning)">
+          Yellow Dash: Stress Tipping Point
+        </p>
+        <p style="font-size: 10px; color: var(--danger)">
+          Red Dash: Performance Decay
+        </p>
+      </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+      let table;
+      let rawData = [],
+        filteredData = [],
+        heatmap = [],
+        averages = [];
+      let margin = 80;
+      let cols = 40,
+        rows = 25;
+      let maxH = 60,
+        minG = 4,
+        maxG = 10;
+      let decayX = -1,
+        stressX = -1;
+
+      function preload() {
+        table = loadTable("Student_Depression_Dataset.csv", "csv", "header");
+      }
+
+      function setup() {
+        let cnv = createCanvas(windowWidth - 320, windowHeight);
+        cnv.parent("canvas-container");
+        for (let r = 0; r < table.getRowCount(); r++) {
+          rawData.push({
+            hours: table.getNum(r, "Work/Study Hours") * 5,
+            cgpa: table.getNum(r, "CGPA"),
+            stress: table.getNum(r, "Academic Pressure"),
+            gender: table.getString(r, "Gender"),
+            age: table.getNum(r, "Age"),
+          });
+        }
+        applyFilters();
+      }
+
+      function applyFilters() {
+        let gender = document.getElementById("genderFilter").value;
+        let age = document.getElementById("ageFilter").value;
+        document.getElementById("ageLabel").innerText = age;
+        filteredData = rawData.filter(
+          (d) => (gender === "All" || d.gender === gender) && d.age >= age,
+        );
+
+        calculateCorrelation();
+        generateVisuals();
+        document.getElementById("status-val").innerText = filteredData.length;
+      }
+
+      function calculateCorrelation() {
+        let n = filteredData.length;
+        if (n < 2) return;
+        let sumX = 0,
+          sumY = 0,
+          sumXY = 0,
+          sumX2 = 0,
+          sumY2 = 0;
+        filteredData.forEach((d) => {
+          sumX += d.hours;
+          sumY += d.cgpa;
+          sumXY += d.hours * d.cgpa;
+          sumX2 += d.hours * d.hours;
+          sumY2 += d.cgpa * d.cgpa;
+        });
+        let num = n * sumXY - sumX * sumY;
+        let den = Math.sqrt(
+          (n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY),
+        );
+        let r = den === 0 ? 0 : num / den;
+
+        document.getElementById("corr-val").innerText = r.toFixed(3);
+        document.getElementById("corr-desc").innerText =
+          r < -0.3
+            ? "Strong Negative Correlation."
+            : r < 0
+              ? "Weak Negative Correlation."
+              : "No clear correlation.";
+      }
+
+      function generateVisuals() {
+        heatmap = Array.from({ length: cols }, () =>
+          Array.from({ length: rows }, () => ({ count: 0, stress: 0 })),
+        );
+        filteredData.forEach((d) => {
+          let cx = floor(map(d.hours, 0, maxH, 0, cols - 1));
+          let ry = floor(map(d.cgpa, minG, maxG, 0, rows - 1));
+          if (heatmap[cx] && heatmap[cx][ry]) {
+            heatmap[cx][ry].count++;
+            heatmap[cx][ry].stress += d.stress;
+          }
+        });
+
+        averages = [];
+        decayX = -1;
+        stressX = -1;
+        for (let h = 0; h <= maxH; h += 1) {
+          let subset = filteredData.filter((d) => abs(d.hours - h) < 4);
+          if (subset.length > 0) {
+            let avgG = subset.reduce((a, b) => a + b.cgpa, 0) / subset.length;
+            let avgS = subset.reduce((a, b) => a + b.stress, 0) / subset.length;
+            averages.push({ x: h, y: avgG, s: avgS });
+            if (avgS > 3.15 && stressX === -1) stressX = h;
+            if (avgG < 6.8 && h > 20 && decayX === -1) decayX = h;
+          }
+        }
+      }
+
+      function draw() {
+        background(5, 10, 20);
+        drawTieredAverages();
+        drawGrid();
+
+        let cellW = (width - margin * 2) / cols;
+        let cellH = (height - margin * 2) / rows;
+
+        for (let i = 0; i < cols; i++) {
+          for (let j = 0; j < rows; j++) {
+            let cell = heatmap[i][j];
+            if (cell.count > 0) {
+              let avgS = cell.stress / cell.count;
+              let x = map(i, 0, cols, margin, width - margin);
+              let y = map(j, 0, rows, height - margin, margin);
+              let c = lerpColor(
+                color("#22d3ee"),
+                color("#f43f5e"),
+                map(avgS, 1, 5, 0, 1),
+              );
+              c.setAlpha(map(cell.count, 1, 8, 140, 255));
+              fill(c);
+              noStroke();
+              rect(x, y - cellH, cellW - 1, cellH - 1, 1);
+            }
+          }
+        }
+
+        noFill();
+        stroke(255, 180);
+        strokeWeight(2);
+        beginShape();
+        averages.forEach((a) =>
+          curveVertex(
+            map(a.x, 0, maxH, margin, width - margin),
+            map(a.y, minG, maxG, height - margin, margin),
+          ),
+        );
+        endShape();
+
+        if (stressX !== -1)
+          drawMarker(stressX, "#eab308", "STRESS CRITICAL", 20);
+        if (decayX !== -1) drawMarker(decayX, "#f43f5e", "DECAY POINT", 60);
+
+        checkHover(cellW, cellH);
+      }
+
+      function drawMarker(val, col, txt, offset) {
+        let vx = map(val, 0, maxH, margin, width - margin);
+        stroke(col);
+        drawingContext.setLineDash([8, 8]);
+        line(vx, margin, vx, height - margin);
+        drawingContext.setLineDash([]);
+        noStroke();
+        fill(col);
+        textSize(10);
+        textAlign(LEFT);
+        text(`${txt}\n@ ${val}h`, vx + 8, margin + offset);
+      }
+
+      function drawTieredAverages() {
+        let ranges = [
+          { s: 0, e: 12 },
+          { s: 12, e: 24 },
+          { s: 24, e: 36 },
+          { s: 36, e: 48 },
+          { s: 48, e: 60 },
+        ];
+        ranges.forEach((r) => {
+          let xStart = map(r.s, 0, maxH, margin, width - margin);
+          let xEnd = map(r.e, 0, maxH, margin, width - margin);
+          let sub = filteredData.filter((d) => d.hours >= r.s && d.hours < r.e);
+          let avgStress =
+            sub.length > 0
+              ? (sub.reduce((a, b) => a + b.stress, 0) / sub.length).toFixed(2)
+              : "0.00";
+
+          textAlign(CENTER);
+          fill(avgStress > 3.15 ? "#eab308" : "#94a3b8");
+          textSize(10);
+          text(
+            `${r.s}-${r.e}h\nAVG: ${avgStress}`,
+            xStart + (xEnd - xStart) / 2,
+            margin - 25,
+          );
+          stroke(255, 15);
+          line(xEnd, margin - 40, xEnd, height - margin);
+        });
+      }
+
+      function drawGrid() {
+        stroke(255, 10);
+        textAlign(RIGHT);
+        textSize(9);
+        for (let i = 0; i <= 10; i++) {
+          let y = map(i * 0.6 + 4, minG, maxG, height - margin, margin);
+          line(margin, y, width - margin, y);
+          noStroke();
+          fill(255, 80);
+          text((i * 0.6 + 4).toFixed(1), margin - 10, y + 3);
+        }
+      }
+
+      function checkHover(cw, ch) {
+        let hVal = map(mouseX, margin, width - margin, 0, maxH);
+        let rangeInsight = document.getElementById("range-insight");
+        let readout = document.getElementById("readout");
+
+        if (
+          mouseX > margin &&
+          mouseX < width - margin &&
+          mouseY > margin &&
+          mouseY < height - margin
+        ) {
+          // Range Detection
+          let start = Math.floor(hVal / 12) * 12;
+          let end = start + 12;
+          let sub = filteredData.filter(
+            (d) => d.hours >= start && d.hours < end,
+          );
+          let atRisk = sub.filter((d) => d.stress > 3.15).length;
+          let riskPct =
+            sub.length > 0 ? ((atRisk / sub.length) * 100).toFixed(1) : 0;
+          let rangeGpa =
+            sub.length > 0
+              ? (sub.reduce((a, b) => a + b.cgpa, 0) / sub.length).toFixed(2)
+              : "N/A";
+
+          rangeInsight.style.display = "block";
+          rangeInsight.innerHTML = `<strong>Range Context: ${start}-${end}h</strong><br>
+                                    Avg CGPA: ${rangeGpa}<br>
+                                    At Risk: ${riskPct}% of students`;
+
+          // Cell Detection
+          let mx = map(mouseX, margin, width - margin, 0, cols);
+          let my = map(mouseY, height - margin, margin, 0, rows);
+          let ix = floor(mx),
+            iy = floor(my);
+
+          if (heatmap[ix] && heatmap[ix][iy] && heatmap[ix][iy].count > 0) {
+            let cell = heatmap[ix][iy];
+            let hx = map(ix, 0, cols, margin, width - margin);
+            let hy = map(iy, 0, rows, height - margin, margin);
+            stroke(255);
+            noFill();
+            rect(hx, hy - ch, cw, ch);
+            readout.innerHTML = `<strong>Cluster Analysis</strong><br>Hours: ${hVal.toFixed(0)}h<br>GPA: ${(minG + (iy / rows) * (maxG - minG)).toFixed(2)}<br>Stress: ${(cell.stress / cell.count).toFixed(2)}`;
+          } else {
+            readout.innerHTML = "Hover over a colored cell for cluster data.";
+          }
+        } else {
+          rangeInsight.style.display = "none";
+        }
+      }
+
+      function windowResized() {
+        resizeCanvas(windowWidth - 320, windowHeight);
+        generateVisuals();
+      }
+    </script>
+  </body>
+</html>
