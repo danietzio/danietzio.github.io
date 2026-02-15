@@ -161,7 +161,18 @@
         stressX = -1;
 
       function preload() {
-        table = loadTable("Student_Depression_Dataset.csv", "csv", "header");
+        // 1. Ensure this string matches your file name EXACTLY (Case-Sensitive)
+        // 2. Adding the './' helps GitHub Pages locate it in the same folder
+        table = loadTable(
+          "./student_depression_dataset.csv",
+          "csv",
+          "header",
+          // Success Callback
+          () => console.log("Data loaded successfully!"),
+          // Error Callback
+          (err) =>
+            console.error("Data failed to load. Check filename case!", err),
+        );
       }
 
       function setup() {
